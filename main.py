@@ -46,6 +46,7 @@ no model calls. Both runs write the same bytes.
 """
 
 import os
+import unicodedata
 from pathlib import Path
 
 LINE = (
@@ -56,30 +57,49 @@ LINE = (
 
 OUTPUT_DIR = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
 
+MIN_LENGTH = 1
+MAX_LENGTH = 160
 
-def validate(line: str) -> None:
-    """Enforce the competition's gate before writing: 1-159 Unicode
-    code points, one line, at least one character that is not white
-    space. Fail loudly instead of writing an entry the gate would
-    refuse."""
-    if not 1 <= len(line) <= 159:
+
+def validate_entry(line: str) -> str:
+    """Enforce the competition's gate before writing and return the
+    validated line unchanged.
+
+    Gate: 1-160 Unicode code points, exactly one line, at least one
+    character that is not whitespace. Hardening on top of the gate:
+    reject control characters (category Cc, plus DEL), reject any
+    other line separator (U+2028, U+2029, vertical tab, form feed),
+    and require the stripped line to still be non-empty so a line
+    of only whitespace can never slip through. Fail loudly instead
+    of writing an entry the gate would refuse."""
+    if not isinstance(line, str):
+        raise SystemExit("entry must be a string")
+    if not MIN_LENGTH <= len(line) <= MAX_LENGTH:
         raise SystemExit(
             f"line is {len(line)} characters "
-            f"({len(line.encode('utf-8'))} bytes), must be 1-159 characters"
+            f"({len(line.encode('utf-8'))} bytes), must be "
+            f"{MIN_LENGTH}-{MAX_LENGTH} characters"
         )
-    if "\n" in line or "\r" in line:
+    if "\n" in line or "\r" in line or "\x0b" in line or "\x0c" in line:
         raise SystemExit("line must be a single line")
+    if "\u2028" in line or "\u2029" in line:
+        raise SystemExit("line must be a single line")
+    if any(unicodedata.category(ch) == "Cc" or ch == "\x7f" for ch in line):
+        raise SystemExit("line must not contain control characters")
+    if not line.strip():
+        raise SystemExit("line must contain a non-whitespace character")
     if not any(not ch.isspace() for ch in line):
         raise SystemExit("line must contain a non-whitespace character")
+    return line
 
 
 def main() -> None:
-    validate(LINE)
+    entry = validate_entry(LINE)
     output_path = Path(OUTPUT_DIR) / "entry.txt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # Write exactly the line: no trailing newline, the judge reads
     # exactly the bytes in the file.
-    output_path.write_text(LINE, encoding="utf-8")
+    output_path.write_text(entry, encoding="utf-8")
 
 
 if __name__ == "__main__":
